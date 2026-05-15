@@ -69,7 +69,9 @@ def _base_url() -> str:
     return f"postgresql+psycopg2://{COCKROACH_USER}:{COCKROACH_PASSWORD}@{COCKROACH_HOST}:{COCKROACH_PORT}"
 
 def _db_url(database: str) -> str:
-    return f"{_base_url()}/{database}?sslmode={COCKROACH_SSL}"
+    # CockroachDB v25+ requires sslmode=verify-full for cloud connections
+    ssl = COCKROACH_SSL if COCKROACH_SSL in ("verify-full", "verify-ca", "disable") else "require"
+    return f"{_base_url()}/{database}?sslmode={ssl}"
 
 # ---------------------------------------------------------------------------
 # Connection pool — one engine per database (lazily created)

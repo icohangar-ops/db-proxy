@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: cockroachdb-proxy
+    runtime: docker
+    plan: free
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: COCKROACH_HOST
+        value: vortex-giraffe-15678.jxf.gcp-us-east1.cockroachlabs.cloud
+      - key: COCKROACH_PORT
+        value: "26257"
+      - key: COCKROACH_USER
+        value: cubiczan
+      - key: COCKROACH_PASSWORD
+        sync: false
+      - key: COCKROACH_SSL
+        value: require
+    healthCheckPath: /api/market-radar
