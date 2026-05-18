@@ -1,7 +1,8 @@
-__pycache__/
-*.pyc
+target/
+*.pdb
 .env
-.venv/
+.env.*
+!.env.example
 
 # CHP session artifacts (local only)
 .chp_registry.json

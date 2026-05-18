@@ -16,4 +16,4 @@ services:
         sync: false
       - key: COCKROACH_SSL
         value: require
-    healthCheckPath: /api/market-radar
+    healthCheckPath: /health

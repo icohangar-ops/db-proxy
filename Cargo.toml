@@ -1,0 +1,28 @@
+[package]
+name = "db-proxy"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Rust CockroachDB REST proxy for governed financial data apps"
+
+[dependencies]
+axum = { version = "0.8", features = ["json", "query"] }
+chrono = { version = "0.4", features = ["serde"] }
+http = "1"
+native-tls = "0.2"
+postgres-native-tls = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-postgres = { version = "0.7", features = [
+  "with-chrono-0_4",
+  "with-serde_json-1",
+  "with-uuid-1"
+] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tower = "0.5"
