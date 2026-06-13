@@ -7,6 +7,8 @@ description = "Rust CockroachDB REST proxy for governed financial data apps"
 
 [dependencies]
 axum = { version = "0.8", features = ["json", "query"] }
+resilient-call = { git = "https://github.com/icohangar-ops/cubiczan-resilience" }
+subtle = "2"
 chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 native-tls = "0.2"

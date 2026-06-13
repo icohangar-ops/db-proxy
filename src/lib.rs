@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, sync::Arc};
+use std::{collections::BTreeMap, env, sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, Query, State},
@@ -9,6 +9,8 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use native_tls::TlsConnector;
+use resilient_call::{crdb_retry, with_timeout, ResilienceError, SqlError};
+use subtle::ConstantTimeEq;
 use postgres_native_tls::MakeTlsConnector;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -22,6 +24,11 @@ use tower_http::{
     trace::TraceLayer,
 };
 use uuid::Uuid;
+
+/// Deadline for establishing a database connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Deadline for an individual query/write to complete.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DATABASES: &[&str] = &[
     "closed_loop_finance",
@@ -166,7 +173,9 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
             .get("x-api-key")
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        if supplied != expected {
+        // Constant-time comparison to avoid leaking the key via response timing.
+        // `ct_eq` returns a `Choice`; only branch on the aggregated result.
+        if supplied.as_bytes().ct_eq(expected.as_bytes()).unwrap_u8() != 1 {
             return Err(ApiError::unauthorized("Invalid or missing API key"));
         }
     }
@@ -176,10 +185,11 @@ fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
 async fn health_check(State(state): State<AppState>) -> Json<Value> {
     let mut results = Map::new();
     for database in DATABASES {
+        // Unauthenticated endpoint: never leak raw DB error detail here.
+        // Report only a coarse per-database status.
         let value = match run_query(&state, database, "SELECT 1 AS ok", &[]).await {
-            Ok(rows) if rows.is_empty() => Value::String("empty".to_string()),
             Ok(_) => Value::String("ok".to_string()),
-            Err(error) => Value::String(error.detail.chars().take(200).collect()),
+            Err(_) => Value::String("degraded".to_string()),
         };
         results.insert((*database).to_string(), value);
     }
@@ -692,10 +702,10 @@ async fn connect_database(state: &AppState, database: &str) -> Result<Client, Ap
 
     if state.config.cockroach_ssl.eq_ignore_ascii_case("disable") {
         pg.ssl_mode(SslMode::Disable);
-        let (client, connection) = pg
-            .connect(NoTls)
+        // Bound the connect handshake so a stalled server cannot hang a request.
+        let (client, connection) = with_timeout(pg.connect(NoTls), CONNECT_TIMEOUT)
             .await
-            .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
+            .map_err(connect_error)?;
         tokio::spawn(async move {
             if let Err(error) = connection.await {
                 tracing::warn!(%error, "database connection closed");
@@ -708,16 +718,31 @@ async fn connect_database(state: &AppState, database: &str) -> Result<Client, Ap
             .build()
             .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
         let connector = MakeTlsConnector::new(connector);
-        let (client, connection) = pg
-            .connect(connector)
+        // Bound the connect handshake so a stalled server cannot hang a request.
+        let (client, connection) = with_timeout(pg.connect(connector), CONNECT_TIMEOUT)
             .await
-            .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
+            .map_err(connect_error)?;
         tokio::spawn(async move {
             if let Err(error) = connection.await {
                 tracing::warn!(%error, "database connection closed");
             }
         });
         Ok(client)
+    }
+}
+
+/// Map a resilient-call connect failure onto a 503, distinguishing timeouts.
+fn connect_error(error: ResilienceError<tokio_postgres::Error>) -> ApiError {
+    match error {
+        ResilienceError::Timeout(dur) => {
+            ApiError::service_unavailable(format!("database connect timed out after {dur:?}"))
+        }
+        other => ApiError::service_unavailable(
+            other
+                .into_source()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "database connect failed".to_string()),
+        ),
     }
 }
 
@@ -729,10 +754,14 @@ async fn run_query(
 ) -> Result<Vec<Value>, ApiError> {
     ensure_database(database)?;
     let client = connect_database(state, database).await?;
-    let rows = client
-        .query(sql, params)
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+    // Retry CockroachDB serialization failures (SQLSTATE 40001) under a single
+    // 30s budget covering all attempts and their backoff.
+    let rows = with_timeout(
+        crdb_retry(|| async { client.query(sql, params).await.map_err(to_sql_error) }),
+        QUERY_TIMEOUT,
+    )
+    .await
+    .map_err(|error| query_error("query", error))?;
     Ok(rows.into_iter().map(row_to_json).collect())
 }
 
@@ -744,11 +773,44 @@ async fn run_write(
 ) -> Result<(), ApiError> {
     ensure_database(database)?;
     let client = connect_database(state, database).await?;
-    client
-        .execute(sql, params)
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+    // Retry CockroachDB serialization failures (SQLSTATE 40001) under a single
+    // 30s budget covering all attempts and their backoff.
+    with_timeout(
+        crdb_retry(|| async { client.execute(sql, params).await.map_err(to_sql_error) }),
+        QUERY_TIMEOUT,
+    )
+    .await
+    .map_err(|error| query_error("write", error))?;
     Ok(())
+}
+
+/// Convert a tokio-postgres error into the crate's `SqlError`, preserving the
+/// SQLSTATE so `crdb_retry` can recognize serialization failures (40001).
+fn to_sql_error(error: tokio_postgres::Error) -> SqlError {
+    let sqlstate = error
+        .code()
+        .map(|state| state.code().to_string())
+        .unwrap_or_default();
+    SqlError::new(sqlstate, error.to_string())
+}
+
+/// Map a resilient-call query/write failure onto an `ApiError`, distinguishing
+/// the 30s timeout from exhausted/terminal SQL errors. The outer `Timeout`
+/// comes from `with_timeout`; the inner `ResilienceError<SqlError>` from
+/// `crdb_retry`.
+fn query_error(kind: &str, error: ResilienceError<ResilienceError<SqlError>>) -> ApiError {
+    match error {
+        ResilienceError::Timeout(dur) => {
+            ApiError::service_unavailable(format!("database {kind} timed out after {dur:?}"))
+        }
+        other => ApiError::internal(
+            other
+                .into_source()
+                .and_then(|inner| inner.into_source())
+                .map(|e| e.message)
+                .unwrap_or_else(|| format!("database {kind} failed")),
+        ),
+    }
 }
 
 async fn table_row_count(state: &AppState, database: &str, table: &str) -> Result<i64, ApiError> {
