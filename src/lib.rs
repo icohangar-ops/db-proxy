@@ -62,14 +62,13 @@ impl Config {
                 .and_then(|value| value.parse::<u16>().ok())
                 .unwrap_or(8080),
             api_key: non_empty_env("API_KEY"),
-            cockroach_host: env::var("COCKROACH_HOST").unwrap_or_else(|_| {
-                "vortex-giraffe-15678.jxf.gcp-us-east1.cockroachlabs.cloud".to_string()
-            }),
+            cockroach_host: env::var("COCKROACH_HOST")
+                .unwrap_or_else(|_| "localhost".to_string()),
             cockroach_port: env::var("COCKROACH_PORT")
                 .ok()
                 .and_then(|value| value.parse::<u16>().ok())
                 .unwrap_or(26257),
-            cockroach_user: env::var("COCKROACH_USER").unwrap_or_else(|_| "cubiczan".to_string()),
+            cockroach_user: env::var("COCKROACH_USER").unwrap_or_else(|_| "root".to_string()),
             cockroach_password: non_empty_env("COCKROACH_PASSWORD"),
             cockroach_ssl: env::var("COCKROACH_SSL").unwrap_or_else(|_| "require".to_string()),
         }

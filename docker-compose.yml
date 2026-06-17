@@ -10,9 +10,9 @@ services:
       # Set this to a strong value for production
       - API_KEY=${API_KEY:-}
       # CockroachDB connection. Password must be supplied through the environment.
-      - COCKROACH_HOST=${COCKROACH_HOST:-vortex-giraffe-15678.jxf.gcp-us-east1.cockroachlabs.cloud}
+      - COCKROACH_HOST=${COCKROACH_HOST:-localhost}
       - COCKROACH_PORT=${COCKROACH_PORT:-26257}
-      - COCKROACH_USER=${COCKROACH_USER:-cubiczan}
+      - COCKROACH_USER=${COCKROACH_USER:-root}
       - COCKROACH_PASSWORD=${COCKROACH_PASSWORD:-}
       - COCKROACH_SSL=${COCKROACH_SSL:-require}
     restart: unless-stopped

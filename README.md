@@ -21,9 +21,9 @@
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP listen port |
 | `API_KEY` | unset | When set, protected routes require `X-API-Key` |
-| `COCKROACH_HOST` | Cubiczan Cockroach Cloud host | Database host |
+| `COCKROACH_HOST` | `localhost` | Database host (set to your CockroachDB Cloud host in production) |
 | `COCKROACH_PORT` | `26257` | Database port |
-| `COCKROACH_USER` | `cubiczan` | Database user |
+| `COCKROACH_USER` | `root` | Database user |
 | `COCKROACH_PASSWORD` | unset | Required for live DB access |
 | `COCKROACH_SSL` | `require` | Use `disable` only for local development |
 

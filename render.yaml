@@ -7,11 +7,11 @@ services:
       - key: API_KEY
         sync: false
       - key: COCKROACH_HOST
-        value: vortex-giraffe-15678.jxf.gcp-us-east1.cockroachlabs.cloud
+        sync: false
       - key: COCKROACH_PORT
         value: "26257"
       - key: COCKROACH_USER
-        value: cubiczan
+        sync: false
       - key: COCKROACH_PASSWORD
         sync: false
       - key: COCKROACH_SSL
